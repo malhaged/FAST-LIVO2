@@ -9,24 +9,24 @@
       ros_driver_bug_fix: false
 
     extrin_calib:
-      extrinsic_T: [0.04165, 0.02326, -0.0284]
+      extrinsic_T: [0.006253, -0.011775, 0.007645]
       extrinsic_R: [1.0, 0.0, 0.0,
                     0.0, 1.0, 0.0,
                     0.0, 0.0, 1.0]
       Rcl: [0.00610193,-0.999863,-0.0154172,
-            -0.00615449,0.0153796,-0.999863,
+          -0.00615449,0.0153796,-0.999863,
             0.999962,0.00619598,-0.0060598] 
       Pcl: [0.0194384, 0.104689,-0.0251952]
 
+
     time_offset: 
-      imu_time_offset: 0.0
       img_time_offset: 0.1
       exposure_time_init: 0.0
 
     preprocess:
       point_filter_num: 1
       filter_size_surf: 0.1
-      lidar_type: 1 # Livox Avia LiDAR
+      lidar_type: 1 # 1=Livox Avia LiDAR; 2=Velodyne LiDAR; 3=Ouster LiDAR
       scan_line: 6
       blind: 0.8
 
@@ -77,13 +77,18 @@
       blind_rgb_points: 0.0
 
     evo:
-      seq_name: "CBD_Building_01"
-      pose_output_en: false
+      seq_name: "Retail_Street"
+      pose_output_en: true
 
     pcd_save:
       pcd_save_en: false
+      type: 0            # 0: World Frame, 1: Body Frame (use 1 for Global-LVBA export)
       colmap_output_en: false # need to set interval = -1
       filter_size_pcd: 0.15
       interval: -1
       # how many LiDAR frames saved in each pcd file;
       # -1 : all frames will be saved in ONE pcd file, may lead to memory crash when having too much frames.
+
+    image_save:
+      img_save_en: false   # set true together with pcd_save.type: 1 for Global-LVBA
+      interval: 1          # save every Nth VIO frame

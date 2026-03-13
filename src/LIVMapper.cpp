@@ -14,6 +14,9 @@ which is included as part of this source code package.
 #include <vikit/camera_loader.h>
 #include <pcl/common/common.h>
 #include <pcl/filters/approximate_voxel_grid.h>
+#include <filesystem>
+#include <sstream>
+#include <iomanip>
 
 using namespace Sophus;
 LIVMapper::LIVMapper(rclcpp::Node::SharedPtr &node, std::string node_name, const rclcpp::NodeOptions & options)
@@ -281,6 +284,14 @@ void LIVMapper::initializeFiles()
   }
   if(colmap_output_en) fout_points.open(std::string(ROOT_DIR) + "Log/Colmap/sparse/0/points3D.txt", std::ios::out);
   if(pcd_save_interval > 0) fout_pcd_pos.open(std::string(ROOT_DIR) + "Log/PCD/scans_pos.json", std::ios::out);
+  if (pcd_save_en && pcd_save_type == 1) {
+    std::filesystem::create_directories(std::string(ROOT_DIR) + "Log/pcd");
+    fout_lidar_pos.open(std::string(ROOT_DIR) + "Log/pcd/lidar_poses.txt", std::ios::out);
+  }
+  if (img_save_en) {
+    std::filesystem::create_directories(std::string(ROOT_DIR) + "Log/image");
+    fout_visual_pos.open(std::string(ROOT_DIR) + "Log/image/image_poses.txt", std::ios::out);
+  }
   fout_pre.open(DEBUG_FILE_DIR("mat_pre.txt"), std::ios::out);
   fout_out.open(DEBUG_FILE_DIR("mat_out.txt"), std::ios::out);
 }
@@ -791,6 +802,16 @@ void LIVMapper::RGBpointBodyToWorld(PointType const *const pi, PointType *const 
   po->x = p_global(0);
   po->y = p_global(1);
   po->z = p_global(2);
+  po->intensity = pi->intensity;
+}
+
+void LIVMapper::RGBpointBodyLidarToIMU(PointType const *const pi, PointType *const po)
+{
+  V3D p_body_lidar(pi->x, pi->y, pi->z);
+  V3D p_body_imu(extR * p_body_lidar + extT);
+  po->x = p_body_imu(0);
+  po->y = p_body_imu(1);
+  po->z = p_body_imu(2);
   po->intensity = pi->intensity;
 }
 
