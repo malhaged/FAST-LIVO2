@@ -12,6 +12,8 @@ which is included as part of this source code package.
 
 #include "LIVMapper.h"
 #include <vikit/camera_loader.h>
+#include <pcl/common/common.h>
+#include <pcl/filters/approximate_voxel_grid.h>
 
 using namespace Sophus;
 LIVMapper::LIVMapper(rclcpp::Node::SharedPtr &node, std::string node_name, const rclcpp::NodeOptions & options)
@@ -19,6 +21,7 @@ LIVMapper::LIVMapper(rclcpp::Node::SharedPtr &node, std::string node_name, const
       extT(0, 0, 0),
       extR(M3D::Identity())
 {
+  node = this->node;  // expose created node back to main
   extrinT.assign(3, 0.0);
   extrinR.assign(9, 0.0);
   cameraextrinT.assign(3, 0.0);
@@ -38,6 +41,7 @@ LIVMapper::LIVMapper(rclcpp::Node::SharedPtr &node, std::string node_name, const
   pcl_w_wait_pub.reset(new PointCloudXYZI());
   pcl_wait_pub.reset(new PointCloudXYZI());
   pcl_wait_save.reset(new PointCloudXYZRGB());
+  pcl_wait_save_downsampled.reset(new PointCloudXYZRGB());
   pcl_wait_save_intensity.reset(new PointCloudXYZI());
   voxelmap_manager.reset(new VoxelMapManager(voxel_config, voxel_map));
   vio_manager.reset(new VIOManager());
@@ -99,6 +103,9 @@ void LIVMapper::readParameters(rclcpp::Node::SharedPtr &node)
   try_declare.template operator()<bool>("imu.imu_en", true);
   try_declare.template operator()<bool>("imu.gravity_est_en", true);
   try_declare.template operator()<bool>("imu.ba_bg_est_en", true);
+  try_declare.template operator()<bool>("imu.vibration_adaptive_en", false);
+  try_declare.template operator()<double>("imu.vibration_scale_acc", 1.0);
+  try_declare.template operator()<double>("imu.vibration_scale_gyr", 1.0);
 
   try_declare.template operator()<double>("preprocess.blind", 0.01);
   try_declare.template operator()<double>("preprocess.filter_size_surf", 0.5);
@@ -110,7 +117,12 @@ void LIVMapper::readParameters(rclcpp::Node::SharedPtr &node)
 
   try_declare.template operator()<int>("pcd_save.interval", -1);
   try_declare.template operator()<bool>("pcd_save.pcd_save_en", false);
+  try_declare.template operator()<bool>("pcd_save.save_raw_points", false);
+  try_declare.template operator()<bool>("pcd_save.incremental_pcd_save_en", false);
   try_declare.template operator()<bool>("pcd_save.colmap_output_en", false);
+  try_declare.template operator()<int>("pcd_save.type", 0);
+  try_declare.template operator()<bool>("image_save.img_save_en", false);
+  try_declare.template operator()<int>("image_save.interval", 1);
   try_declare.template operator()<double>("pcd_save.filter_size_pcd", 0.5);
   try_declare.template operator()<vector<double>>("extrin_calib.extrinsic_T", vector<double>{});
   try_declare.template operator()<vector<double>>("extrin_calib.extrinsic_R", vector<double>{});
@@ -146,6 +158,7 @@ void LIVMapper::readParameters(rclcpp::Node::SharedPtr &node)
   this->node->get_parameter("vio.outlier_threshold", outlier_threshold);
   this->node->get_parameter("time_offset.exposure_time_init", exposure_time_init);
   this->node->get_parameter("time_offset.img_time_offset", img_time_offset);
+  this->node->get_parameter("time_offset.imu_time_offset", imu_time_offset);
   this->node->get_parameter("uav.imu_rate_odom", imu_prop_enable);
   this->node->get_parameter("uav.gravity_align_en", gravity_align_en);
 
@@ -157,6 +170,9 @@ void LIVMapper::readParameters(rclcpp::Node::SharedPtr &node)
   this->node->get_parameter("imu.imu_en", imu_en);
   this->node->get_parameter("imu.gravity_est_en", gravity_est_en);
   this->node->get_parameter("imu.ba_bg_est_en", ba_bg_est_en);
+  this->node->get_parameter("imu.vibration_adaptive_en", vibration_adaptive_en);
+  this->node->get_parameter("imu.vibration_scale_acc", vibration_scale_acc);
+  this->node->get_parameter("imu.vibration_scale_gyr", vibration_scale_gyr);
 
   this->node->get_parameter("preprocess.blind", p_pre->blind);
   this->node->get_parameter("preprocess.filter_size_surf", filter_size_surf_min);
@@ -168,7 +184,12 @@ void LIVMapper::readParameters(rclcpp::Node::SharedPtr &node)
 
   this->node->get_parameter("pcd_save.interval", pcd_save_interval);
   this->node->get_parameter("pcd_save.pcd_save_en", pcd_save_en);
+  this->node->get_parameter("pcd_save.incremental_pcd_save_en", incremental_pcd_save_en);
+  this->node->get_parameter("pcd_save.save_raw_points", save_raw_points);
   this->node->get_parameter("pcd_save.colmap_output_en", colmap_output_en);
+  this->node->get_parameter("pcd_save.type", pcd_save_type);
+  this->node->get_parameter("image_save.img_save_en", img_save_en);
+  this->node->get_parameter("image_save.interval", img_save_interval);
   this->node->get_parameter("pcd_save.filter_size_pcd", filter_size_pcd);
   this->node->get_parameter("extrin_calib.extrinsic_T", extrinT);
   this->node->get_parameter("extrin_calib.extrinsic_R", extrinR);
@@ -228,6 +249,7 @@ void LIVMapper::initializeComponents(rclcpp::Node::SharedPtr &node)
   p_imu->set_gyr_bias_cov(V3D(0.0001, 0.0001, 0.0001));
   p_imu->set_acc_bias_cov(V3D(0.0001, 0.0001, 0.0001));
   p_imu->set_imu_init_frame_num(imu_int_frame);
+  p_imu->set_vibration_adaptive(vibration_adaptive_en, vibration_scale_acc, vibration_scale_gyr);
 
   if (!imu_en) p_imu->disable_imu();
   if (!gravity_est_en) p_imu->disable_gravity_est();
@@ -326,6 +348,11 @@ void LIVMapper::processImu()
 {
   // double t0 = omp_get_wtime();
 
+  if (reset_imu) {
+    p_imu->imu_need_init = true;
+    reset_imu = false;
+    gravity_align_finished = false;
+  }
   p_imu->Process2(LidarMeasures, _state, feats_undistort);
 
   if (gravity_align_en) gravityAlignment();
@@ -373,14 +400,13 @@ void LIVMapper::handleVIO()
   if (fabs((LidarMeasures.last_lio_update_time - _first_lidar_time) - plot_time) < (frame_cnt / 2 * 0.1)) 
   {
     vio_manager->plot_flag = true;
-  } 
-  else 
+  }
+  else
   {
     vio_manager->plot_flag = false;
   }
 
   vio_manager->processFrame(LidarMeasures.measures.back().img, _pv_list, voxelmap_manager->voxel_map_, LidarMeasures.last_lio_update_time - _first_lidar_time);
-
   if (imu_prop_enable) 
   {
     ekf_finish_once = true;
@@ -569,40 +595,43 @@ void LIVMapper::savePCD()
     if (img_en)
     {
       pcl::PointCloud<pcl::PointXYZRGB>::Ptr downsampled_cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
-      pcl::VoxelGrid<pcl::PointXYZRGB> voxel_filter;
+      pcl::ApproximateVoxelGrid<pcl::PointXYZRGB> voxel_filter;
       voxel_filter.setInputCloud(pcl_wait_save);
       voxel_filter.setLeafSize(filter_size_pcd, filter_size_pcd, filter_size_pcd);
       voxel_filter.filter(*downsampled_cloud);
-  
-      pcd_writer.writeBinary(raw_points_dir, *pcl_wait_save); // Save the raw point cloud data
-      std::cout << GREEN << "Raw point cloud data saved to: " << raw_points_dir 
-                << " with point count: " << pcl_wait_save->points.size() << RESET << std::endl;
-      
-      pcd_writer.writeBinary(downsampled_points_dir, *downsampled_cloud); // Save the downsampled point cloud data
-      std::cout << GREEN << "Downsampled point cloud data saved to: " << downsampled_points_dir 
+
+      if (save_raw_points)
+      {
+        pcd_writer.writeBinary(raw_points_dir, *pcl_wait_save);
+        std::cout << GREEN << "Raw point cloud saved to: " << raw_points_dir
+                  << " (" << pcl_wait_save->points.size() << " points)" << RESET << std::endl;
+      }
+
+      pcd_writer.writeBinary(downsampled_points_dir, *downsampled_cloud);
+      std::cout << GREEN << "Downsampled point cloud data saved to: " << downsampled_points_dir
                 << " with point count after filtering: " << downsampled_cloud->points.size() << RESET << std::endl;
 
-      if(colmap_output_en)
+      if (colmap_output_en)
       {
         fout_points << "# 3D point list with one line of data per point\n";
         fout_points << "#  POINT_ID, X, Y, Z, R, G, B, ERROR\n";
-        for (size_t i = 0; i < downsampled_cloud->size(); ++i) 
+        for (size_t i = 0; i < downsampled_cloud->size(); ++i)
         {
-            const auto& point = downsampled_cloud->points[i];
-            fout_points << i << " "
-                        << std::fixed << std::setprecision(6)
-                        << point.x << " " << point.y << " " << point.z << " "
-                        << static_cast<int>(point.r) << " "
-                        << static_cast<int>(point.g) << " "
-                        << static_cast<int>(point.b) << " "
-                        << 0 << std::endl;
+          const auto& point = downsampled_cloud->points[i];
+          fout_points << i << " "
+                      << std::fixed << std::setprecision(6)
+                      << point.x << " " << point.y << " " << point.z << " "
+                      << static_cast<int>(point.r) << " "
+                      << static_cast<int>(point.g) << " "
+                      << static_cast<int>(point.b) << " "
+                      << 0 << '\n';
         }
       }
     }
     else
-    {      
+    {
       pcd_writer.writeBinary(raw_points_dir, *pcl_wait_save_intensity);
-      std::cout << GREEN << "Raw point cloud data saved to: " << raw_points_dir 
+      std::cout << GREEN << "Raw point cloud data saved to: " << raw_points_dir
                 << " with point count: " << pcl_wait_save_intensity->points.size() << RESET << std::endl;
     }
   }
@@ -611,11 +640,10 @@ void LIVMapper::savePCD()
 void LIVMapper::run(rclcpp::Node::SharedPtr &node) 
 {
   rclcpp::Rate rate(5000);
-  while (rclcpp::ok()) 
+  while (rclcpp::ok())
   {
     rclcpp::spin_some(this->node);
-    if (!sync_packages(LidarMeasures)) 
-    {
+    if (!sync_packages(LidarMeasures))    {
       rate.sleep();
       continue;
     }
@@ -885,7 +913,7 @@ void LIVMapper::imu_cbk(const sensor_msgs::msg::Imu::ConstSharedPtr &msg_in)
 cv::Mat LIVMapper::getImageFromMsg(const sensor_msgs::msg::Image::ConstSharedPtr &img_msg)
 {
   cv::Mat img;
-  img = cv_bridge::toCvShare(img_msg, "bgr8")->image;
+  img = cv_bridge::toCvCopy(img_msg, "bgr8")->image;
   return img;
 }
 
@@ -1384,5 +1412,6 @@ void LIVMapper::publish_path(const rclcpp::Publisher<nav_msgs::msg::Path>::Share
   msg_body_pose.header.stamp = this->node->get_clock()->now();
   msg_body_pose.header.frame_id = "camera_init";
   path.poses.push_back(msg_body_pose);
+  path.header.stamp = msg_body_pose.header.stamp;
   pubPath->publish(path);
 }
