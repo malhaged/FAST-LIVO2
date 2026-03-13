@@ -445,6 +445,34 @@ void LIVMapper::handleVIO()
   fout_out << std::setw(20) << LidarMeasures.last_lio_update_time - _first_lidar_time << " " << euler_cur.transpose() * 57.3 << " "
             << _state.pos_end.transpose() << " " << _state.vel_end.transpose() << " " << _state.bias_g.transpose() << " "
             << _state.bias_a.transpose() << " " << V3D(_state.inv_expo_time, 0, 0).transpose() << " " << feats_undistort->points.size() << std::endl;
+
+  // --- LVBA Export: image + visual pose ---
+  if (img_save_en && !vio_manager->img_rgb.empty())
+  {
+    static int img_wait_num = 0;
+    img_wait_num++;
+    if (img_save_interval > 0 && img_wait_num >= img_save_interval)
+    {
+      double save_time = LidarMeasures.measures.back().vio_time;
+      std::stringstream ss;
+      ss << std::fixed << std::setprecision(6) << save_time;
+
+      std::string img_path = std::string(ROOT_DIR) + "Log/image/" + ss.str() + ".png";
+      cv::imwrite(img_path, vio_manager->img_rgb);
+      std::cout << "[ LVBA ] saved image: " << img_path << std::endl;
+
+      Eigen::Quaterniond q(_state.rot_end);
+      fout_visual_pos << std::fixed << std::setprecision(6)
+                      << save_time << " "
+                      << _state.pos_end[0] << " "
+                      << _state.pos_end[1] << " "
+                      << _state.pos_end[2] << " "
+                      << q.x() << " " << q.y() << " " << q.z() << " " << q.w()
+                      << std::endl;
+      img_wait_num = 0;
+    }
+  }
+  // --- end LVBA Export ---
 }
 
 void LIVMapper::handleLIO() 
@@ -593,6 +621,34 @@ void LIVMapper::handleLIO()
   fout_out << std::setw(20) << LidarMeasures.last_lio_update_time - _first_lidar_time << " " << euler_cur.transpose() * 57.3 << " "
             << _state.pos_end.transpose() << " " << _state.vel_end.transpose() << " " << _state.bias_g.transpose() << " "
             << _state.bias_a.transpose() << " " << V3D(_state.inv_expo_time, 0, 0).transpose() << " " << feats_undistort->points.size() << std::endl;
+
+  // --- LVBA Export: body-frame PCD + LiDAR pose ---
+  if (pcd_save_en && pcd_save_type == 1 && feats_undistort && !feats_undistort->empty())
+  {
+    double save_time = LidarMeasures.measures.back().lio_time;
+    std::stringstream ss;
+    ss << std::fixed << std::setprecision(6) << save_time;
+
+    int sz = feats_undistort->points.size();
+    PointCloudXYZI::Ptr cloud_body(new PointCloudXYZI(sz, 1));
+    for (int i = 0; i < sz; i++)
+      RGBpointBodyLidarToIMU(&feats_undistort->points[i], &cloud_body->points[i]);
+
+    std::string pcd_path = std::string(ROOT_DIR) + "Log/pcd/" + ss.str() + ".pcd";
+    pcl::PCDWriter pcd_writer;
+    pcd_writer.writeBinary(pcd_path, *cloud_body);
+    std::cout << "[ LVBA ] saved body-frame PCD: " << pcd_path << std::endl;
+
+    Eigen::Quaterniond q(_state.rot_end);
+    fout_lidar_pos << std::fixed << std::setprecision(6)
+                   << save_time << " "
+                   << _state.pos_end[0] << " "
+                   << _state.pos_end[1] << " "
+                   << _state.pos_end[2] << " "
+                   << q.x() << " " << q.y() << " " << q.z() << " " << q.w()
+                   << std::endl;
+  }
+  // --- end LVBA Export ---
 }
 
 void LIVMapper::savePCD() 
