@@ -4,6 +4,98 @@
 
 Thanks to hku mars lab chunran zheng for the open source excellent work
 
+---
+
+## About This Fork
+
+This repository is maintained by the **Intelligent Agricultural Systems** research group at **Hochschule Osnabrück**. It is based on the ROS2 port by [integralrobotics](https://github.com/integralrobotics/FAST-LIVO2) and extends FAST-LIVO2 with a dedicated export mode for post-processing with [Global-LVBA](https://github.com/xuankuzcr/Global-LVBA).
+
+### Source Repositories
+
+| Component | Source |
+|---|---|
+| FAST-LIVO2 ROS2 port | https://github.com/integralrobotics/FAST-LIVO2 |
+| Livox ROS2 Driver | https://github.com/Livox-SDK/livox_ros_driver2 |
+| Livox SDK2 | https://github.com/Livox-SDK/Livox-SDK2 |
+| rpg_vikit (ROS2) | https://github.com/integralrobotics/rpg_vikit |
+
+---
+
+## Installation
+
+### Prerequisites
+
+Install Livox SDK2 via CMake as described in the [Livox SDK2 README](https://github.com/Livox-SDK/Livox-SDK2/blob/master/README.md).
+
+### Build
+
+```bash
+colcon build --symlink-install --packages-select livox_ros_driver2
+colcon build --symlink-install --packages-select vikit_common vikit_ros vikit_py
+colcon build --symlink-install --packages-select fast_livo
+```
+
+---
+
+## ROS1 Bag to ROS2 Bag Conversion
+
+```bash
+pip install rosbags
+rosbags-convert --src ~/fast-livo2-dataset/CBD_Building_01.bag --dst CBD_Building_01
+```
+
+Since this fork uses `livox_ros_driver2`, the message type in the converted bag must be updated:
+
+```bash
+sqlite3 CBD_Building_01/CBD_Building_01.db3
+```
+```sql
+.tables
+UPDATE topics
+SET type = REPLACE(type, 'livox_ros_driver', 'livox_ros_driver2')
+WHERE type LIKE '%livox_ros_driver%';
+```
+
+---
+
+## Global-LVBA Export Mode
+
+This fork adds a dedicated export mode that saves per-frame body-frame point clouds, camera images, and poses in the format required by [Global-LVBA](https://github.com/xuankuzcr/Global-LVBA) for LiDAR-visual bundle adjustment post-processing.
+
+### Configuration (`config/avia.yaml`)
+
+```yaml
+pcd_save:
+  pcd_save_en: true
+  type: 1      # 0: World Frame (default), 1: Body Frame (required for Global-LVBA)
+  interval: 1  # Save one PCD file per LiDAR scan
+
+image_save:
+  img_save_en: true
+  interval: 1  # Save every VIO frame
+```
+
+### Output Structure
+
+```
+Log/
+├── pcd/
+│   ├── <timestamp>.pcd    # Per-frame LiDAR scans in body frame (PointXYZI)
+│   └── lidar_poses.txt    # TUM format: timestamp tx ty tz qx qy qz qw
+└── image/
+    ├── <timestamp>.png    # Undistorted camera images
+    └── image_poses.txt    # TUM format: timestamp tx ty tz qx qy qz qw
+```
+
+### Transferring Data to Global-LVBA
+
+```bash
+cp -r Log/pcd/   <global_lvba_ws>/dataset/<sequence>/all_pcd_body/
+cp -r Log/image/ <global_lvba_ws>/dataset/<sequence>/all_image/
+```
+
+---
+
 ### 📢 News
 
 - 🔓 **2025-01-23**: Code released!  
