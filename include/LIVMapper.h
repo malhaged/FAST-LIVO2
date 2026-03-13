@@ -51,6 +51,7 @@ public:
   void pointBodyToWorld(const PointType &pi, PointType &po);
  
   void RGBpointBodyToWorld(PointType const *const pi, PointType *const po);
+  void RGBpointBodyLidarToIMU(PointType const *const pi, PointType *const po);
   void standard_pcl_cbk(const sensor_msgs::msg::PointCloud2::ConstSharedPtr &msg);
   void livox_pcl_cbk(const livox_ros_driver2::msg::CustomMsg::ConstSharedPtr &msg_in);
   void imu_cbk(const sensor_msgs::msg::Imu::ConstSharedPtr &msg_in);
@@ -90,8 +91,15 @@ public:
   double _first_lidar_time = 0.0;
   double match_time = 0, solve_time = 0, solve_const_H_time = 0;
 
-  bool lidar_map_inited = false, pcd_save_en = false, pub_effect_point_en = false, pose_output_en = false, ros_driver_fix_en = false;
+  bool lidar_map_inited = false, pcd_save_en = false, pub_effect_point_en = false,
+       pose_output_en = false, ros_driver_fix_en = false, save_raw_points = false, reset_imu = false,
+       vibration_adaptive_en = false, incremental_pcd_save_en = false,
+       img_save_en = false;
+  double vibration_scale_acc = 1.0, vibration_scale_gyr = 1.0;
+
   int pcd_save_interval = -1, pcd_index = 0;
+  int pcd_save_type = 0;    // 0: world frame, 1: body frame
+  int img_save_interval = 1;
   int pub_scan_num = 1;
 
   StatesGroup imu_propagate, latest_ekf_state;
@@ -142,9 +150,10 @@ public:
   PointCloudXYZI::Ptr pcl_w_wait_pub;
   PointCloudXYZI::Ptr pcl_wait_pub;
   PointCloudXYZRGB::Ptr pcl_wait_save;
+  PointCloudXYZRGB::Ptr pcl_wait_save_downsampled;
   PointCloudXYZI::Ptr pcl_wait_save_intensity;
 
-  ofstream fout_pre, fout_out, fout_pcd_pos, fout_points;
+  ofstream fout_pre, fout_out, fout_pcd_pos, fout_points, fout_lidar_pos, fout_visual_pos;
 
   pcl::VoxelGrid<PointType> downSizeFilterSurf;
 
