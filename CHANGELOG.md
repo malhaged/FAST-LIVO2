@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] - 2026-03-19
+
+### Added
+- **Global-LVBA Export Mode:** Body-frame PCD and image export for post-processing with [Global-LVBA](https://github.com/xuankuzcr/Global-LVBA).
+  - `pcd_save.type`: 0 = world frame (default), 1 = body frame (required for Global-LVBA).
+  - `image_save.img_save_en` / `image_save.interval`: Save undistorted camera images per VIO frame.
+  - Per-frame pose files in TUM format: `Log/pcd/lidar_poses.txt`, `Log/image/image_poses.txt`.
+- **Ouster OS1-128 Support:** Updated point struct registration in `preprocess.h` to match the current `ouster-ros` driver format (`uint16_t ring`, `signal`, `near_ir`; removed `intensity` and `ambient`).
+- **ARM Build Flags:** `CMakeLists.txt` now detects CPU architecture and applies optimized compiler flags:
+  - aarch64 (Jetson Orin NX, RK3588): `-O3 -mcpu=native -mtune=native -ffast-math`
+  - ARM 32-bit: adds `-mfpu=neon`
+  - x86-64: `-O3 -march=native -mtune=native -funroll-loops`
+- **2026 AGT Aussen Dataset Config:** `config/2026_agt_aussen.yaml` and `config/camera_2026_agt_aussen.yaml` for Ouster OS1-128 + camera rig with iKalibr calibration.
+- **IMU Init Retry Logic:** Extended motion-detection during IMU initialization with configurable retry count (`max_init_retries_`, default 5). After max retries, initialization proceeds regardless to avoid infinite init loops in dynamic environments.
+- **Unit Test Infrastructure:** GTest targets `test_imu_processing` and `test_voxel_map` added to `CMakeLists.txt` (test sources excluded from the repo via `.gitignore`).
+
+### Changed
+- **IMU Init Motion Detection:** Welford's online algorithm now tracks per-axis variance throughout the full initialization window (previously only described, now fully implemented with retry loop).
+- **README:** Added complete "About This Fork" section documenting bug fixes, new features, supported datasets, and build instructions.
+- **`.gitignore`:** Added `docs/` and `test/` to prevent internal planning documents and development tests from being committed.
+
 ## [Unreleased] - 2026-03-06
 
 ### Added
