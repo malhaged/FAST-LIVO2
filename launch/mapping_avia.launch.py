@@ -16,8 +16,8 @@ def generate_launch_description():
     rviz_config_file = os.path.join(get_package_share_directory("fast_livo"), "rviz_cfg", "fast_livo2.rviz")
 
     #Load parameters
-    avia_config_cmd = os.path.join(config_file_dir, "avia.yaml")
-    camera_config_cmd = os.path.join(config_file_dir, "camera_pinhole.yaml")
+    avia_config_cmd = os.path.join(config_file_dir, "botanical.yaml")
+    camera_config_cmd = os.path.join(config_file_dir, "camera_botanical.yaml")
 
     # Param use_rviz
     use_rviz_arg = DeclareLaunchArgument(
@@ -90,9 +90,14 @@ def generate_launch_description():
             # https://docs.ros.org/en/humble/How-To-Guides/Getting-Backtraces-in-ROS-2.html
             prefix=[
                 # ("gdb -ex run --args"),
-                # ("valgrind --log-file=./valgrind_report.log --tool=memcheck --leak-check=full --show-leak-kinds=all -s --track-origins=yes --show-reachable=yes --undef-value-errors=yes --track-fds=yes")
+                # ("valgrind --log-file=./valgrind_report.log --tool=memcheck --leak-check=full --show-leak-kinds=yes --undef-value-errors=yes --track-fds=yes")
             ],
-            output="screen"
+            output="screen",
+            # PCD save + COLMAP output at shutdown can take >15 s for large maps.
+            # Give the process 120 s after SIGINT before escalating to SIGTERM,
+            # and another 60 s after SIGTERM before SIGKILL.
+            sigterm_timeout='120',
+            sigkill_timeout='60',
         ),
 
         Node(

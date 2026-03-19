@@ -610,6 +610,7 @@ void VIOManager::retrieveFromVisualSparseMap(cv::Mat img, vector<pointWithVar> &
       // double t_1 = omp_get_wtime();
 
       VisualPoint *pt = retrieve_voxel_points[i];
+      if (pt == nullptr) continue;
       // visual_sub_map_cur.push_back(pt); // before
 
       V2D pc(new_frame_->w2c(pt->pos_));
@@ -1447,10 +1448,20 @@ void VIOManager::updateStateInverse(cv::Mat img, int level)
       V3D pf = Rcw * pt->pos_ + Pcw;
       pc = cam->world2cam(pf);
 
+      if (pf[2] <= 0) continue;
+
       const float u_ref = pc[0];
       const float v_ref = pc[1];
       const int u_ref_i = floorf(pc[0] / scale) * scale;
       const int v_ref_i = floorf(pc[1] / scale) * scale;
+
+      {
+        const int border = (patch_size_half + 1) * scale;
+        if (u_ref_i < border || u_ref_i + border > width ||
+            v_ref_i < border || v_ref_i + border > height)
+          continue;
+      }
+
       const float subpix_u_ref = (u_ref - u_ref_i) / scale;
       const float subpix_v_ref = (v_ref - v_ref_i) / scale;
       const float w_ref_tl = (1.0 - subpix_u_ref) * (1.0 - subpix_v_ref);
@@ -1574,6 +1585,8 @@ void VIOManager::updateState(cv::Mat img, int level)
       V3D pf = Rcw * pt->pos_ + Pcw;
       V2D pc = cam->world2cam(pf);
 
+      if (pf[2] <= 0) continue;
+
       computeProjectionJacobian(pf, Jdpi);
       M3D p_hat;
       p_hat << SKEW_SYM_MATRX(pf);
@@ -1582,6 +1595,15 @@ void VIOManager::updateState(cv::Mat img, int level)
       float v_ref = pc[1];
       int u_ref_i = floorf(pc[0] / scale) * scale;
       int v_ref_i = floorf(pc[1] / scale) * scale;
+
+      // Guard: gradient stencil accesses ±(patch_size_half+1) pixels from center
+      {
+        const int border = (patch_size_half + 1) * scale;
+        if (u_ref_i < border || u_ref_i + border > width ||
+            v_ref_i < border || v_ref_i + border > height)
+          continue;
+      }
+
       float subpix_u_ref = (u_ref - u_ref_i) / scale;
       float subpix_v_ref = (v_ref - v_ref_i) / scale;
       float w_ref_tl = (1.0 - subpix_u_ref) * (1.0 - subpix_v_ref);

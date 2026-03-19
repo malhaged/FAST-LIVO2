@@ -24,6 +24,8 @@ ImuProcess::ImuProcess() : Eye3d(M3D::Identity()),
   cov_bias_gyr = V3D(0.1, 0.1, 0.1);
   cov_bias_acc = V3D(0.1, 0.1, 0.1);
   cov_inv_expo = 0.2;
+  ema_s_acc = 1.0;
+  ema_s_gyr = 1.0;
   mean_acc = V3D(0, 0, -1.0);
   mean_gyr = V3D(0, 0, 0);
   angvel_last = Zero3d;
@@ -92,9 +94,15 @@ void ImuProcess::set_extrinsic(const V3D &transl, const M3D &rot)
   Lid_rot_to_IMU = rot;
 }
 
-void ImuProcess::set_gyr_cov_scale(const V3D &scaler) { cov_gyr = scaler; }
+void ImuProcess::set_gyr_cov_scale(const V3D &scaler) {
+  cov_gyr = scaler;
+  base_cov_gyr = scaler;
+}
 
-void ImuProcess::set_acc_cov_scale(const V3D &scaler) { cov_acc = scaler; }
+void ImuProcess::set_acc_cov_scale(const V3D &scaler) {
+  cov_acc = scaler;
+  base_cov_acc = scaler;
+}
 
 void ImuProcess::set_gyr_bias_cov(const V3D &b_g) { cov_bias_gyr = b_g; }
 
@@ -104,11 +112,25 @@ void ImuProcess::set_acc_bias_cov(const V3D &b_a) { cov_bias_acc = b_a; }
 
 void ImuProcess::set_imu_init_frame_num(const int &num) { MAX_INI_COUNT = num; }
 
+void ImuProcess::set_vibration_adaptive(bool en, double scale_acc, double scale_gyr)
+{
+  vibration_adaptive_en = en;
+  vibration_scale_acc = scale_acc;
+  vibration_scale_gyr = scale_gyr;
+}
+
+void ImuProcess::set_init_motion_thresholds(double acc_thr, double gyr_thr, int max_retries)
+{
+  init_acc_var_threshold_ = acc_thr;
+  init_gyr_var_threshold_ = gyr_thr;
+  max_init_retries_       = max_retries;
+}
+
 void ImuProcess::IMU_init(const MeasureGroup &meas, StatesGroup &state_inout, int &N)
 {
   /** 1. initializing the gravity, gyro bias, acc and gyro covariance
-   ** 2. normalize the acceleration measurenments to unit gravity **/
-  RCLCPP_INFO(rclcpp::get_logger(""),"IMU Initializing: %.1f %%", double(N) / MAX_INI_COUNT * 100);
+   ** 2. normalize the acceleration measurements to unit gravity **/
+  RCLCPP_INFO(rclcpp::get_logger(""), "IMU Initializing: %.1f %%", double(N) / MAX_INI_COUNT * 100);
   V3D cur_acc, cur_gyr;
 
   if (b_first_frame)
@@ -120,8 +142,8 @@ void ImuProcess::IMU_init(const MeasureGroup &meas, StatesGroup &state_inout, in
     const auto &gyr_acc = meas.imu.front()->angular_velocity;
     mean_acc << imu_acc.x, imu_acc.y, imu_acc.z;
     mean_gyr << gyr_acc.x, gyr_acc.y, gyr_acc.z;
-    // first_lidar_time = meas.lidar_frame_beg_time;
-    // cout<<"init acc norm: "<<mean_acc.norm()<<endl;
+    var_acc_init = V3D::Zero();
+    var_gyr_init = V3D::Zero();
   }
 
   for (const auto &imu : meas.imu)
@@ -131,24 +153,63 @@ void ImuProcess::IMU_init(const MeasureGroup &meas, StatesGroup &state_inout, in
     cur_acc << imu_acc.x, imu_acc.y, imu_acc.z;
     cur_gyr << gyr_acc.x, gyr_acc.y, gyr_acc.z;
 
+    V3D prev_mean_acc = mean_acc;
+    V3D prev_mean_gyr = mean_gyr;
+
     mean_acc += (cur_acc - mean_acc) / N;
     mean_gyr += (cur_gyr - mean_gyr) / N;
 
-    // cov_acc = cov_acc * (N - 1.0) / N + (cur_acc -
-    // mean_acc).cwiseProduct(cur_acc - mean_acc) * (N - 1.0) / (N * N); cov_gyr
-    // = cov_gyr * (N - 1.0) / N + (cur_gyr - mean_gyr).cwiseProduct(cur_gyr -
-    // mean_gyr) * (N - 1.0) / (N * N);
-
-    // cout<<"acc norm: "<<cur_acc.norm()<<" "<<mean_acc.norm()<<endl;
+    // Real-time variance estimation (Welford's algorithm)
+    var_acc_init += (cur_acc - prev_mean_acc).cwiseProduct(cur_acc - mean_acc);
+    var_gyr_init += (cur_gyr - prev_mean_gyr).cwiseProduct(cur_gyr - mean_gyr);
 
     N++;
   }
-  IMU_mean_acc_norm = mean_acc.norm();
-  state_inout.gravity = -mean_acc / mean_acc.norm() * G_m_s2;
-  state_inout.rot_end = Eye3d; // Exp(mean_acc.cross(V3D(0, 0, -1 / scale_gravity)));
-  state_inout.bias_g = Zero3d; // mean_gyr;
 
-  last_imu = meas.imu.back();
+  if (N > MAX_INI_COUNT)
+  {
+    V3D final_var_acc = var_acc_init / (N - 1);
+    V3D final_var_gyr = var_gyr_init / (N - 1);
+
+    // Static check: if significant motion is detected during init, reset and try again.
+    // Thresholds are generous to handle sensor noise on vibrating platforms (AGVs, drones).
+    // After max_init_retries_, proceed anyway to avoid an infinite init loop in dynamic
+    // environments (e.g. a vehicle that never comes to a complete stop).
+    bool motion_detected = (final_var_acc.norm() > init_acc_var_threshold_ ||
+                            final_var_gyr.norm() > init_gyr_var_threshold_);
+    if (motion_detected && init_retry_count_ < max_init_retries_)
+    {
+      RCLCPP_WARN(rclcpp::get_logger(""),
+                  "IMU motion detected during init (acc_var: %.3f, gyr_var: %.3f). "
+                  "Retry %d/%d...",
+                  final_var_acc.norm(), final_var_gyr.norm(),
+                  init_retry_count_ + 1, max_init_retries_);
+      init_retry_count_++;
+      b_first_frame = true;
+      N = 1;
+      return;
+    }
+    if (motion_detected)
+    {
+      RCLCPP_WARN(rclcpp::get_logger(""),
+                  "IMU init: max retries reached, proceeding despite motion "
+                  "(acc_var: %.3f, gyr_var: %.3f).",
+                  final_var_acc.norm(), final_var_gyr.norm());
+    }
+
+    IMU_mean_acc_norm = mean_acc.norm();
+    state_inout.gravity = -mean_acc / mean_acc.norm() * G_m_s2;
+    state_inout.rot_end = Eye3d;
+    state_inout.bias_g = Zero3d;
+
+    last_imu = meas.imu.back();
+    imu_need_init = false;
+    init_retry_count_ = 0;
+
+    RCLCPP_INFO(rclcpp::get_logger(""), "IMU Initialization SUCCESS. Gravity: %.4f %.4f %.4f; Norm: %.4f",
+                 state_inout.gravity[0], state_inout.gravity[1], state_inout.gravity[2], IMU_mean_acc_norm);
+    fout_imu.open(DEBUG_FILE_DIR("imu.txt"), ios::out);
+  }
 }
 
 void ImuProcess::Forward_without_imu(LidarMeasureGroup &meas, StatesGroup &state_inout, PointCloudXYZI &pcl_out)
@@ -225,9 +286,9 @@ void ImuProcess::Forward_without_imu(LidarMeasureGroup &meas, StatesGroup &state
         // Using rotation and translation to un-distort points
         V3D p_jk;
         p_jk = - state_inout.rot_end.transpose() * state_inout.vel_end * dt_j;
-  
+
         V3D P_compensate =  R_jk * P_j + p_jk;
-  
+
         /// save Undistorted points and their rotation
         it_pcl->x = P_compensate(0);
         it_pcl->y = P_compensate(1);
@@ -281,6 +342,9 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
     pcl_wait_proc.resize(lidar_meas.pcl_proc_cur->points.size());
     pcl_wait_proc = *(lidar_meas.pcl_proc_cur);
     lidar_meas.lidar_scan_index_now = 0;
+    // offset_time is relative to the first lidar point of the current scan (see Pose6D in types.h).
+    // Using 0.0 for the initial entry preserves the relative domain required by the
+    // backward undistortion loop in UndistortPcl (it_pcl->curvature/1000 vs offset_time).
     IMUpose.push_back(set_pose6d(0.0, acc_s_last, angvel_last, state_inout.vel_end, state_inout.pos_end, state_inout.rot_end));
   }
 
@@ -318,6 +382,56 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
     tau = state_inout.inv_expo_time;
     // RCLCPP_ERROR_STREAM(rclcpp::get_logger(""),"tau: %.6f !!!!!!", tau);
   }
+
+  if (vibration_adaptive_en && !v_imu.empty())
+  {
+    V3D sum_acc = V3D::Zero(), sum_gyr = V3D::Zero();
+    for (const auto &imu : v_imu)
+    {
+      sum_acc += V3D(imu->linear_acceleration.x, imu->linear_acceleration.y, imu->linear_acceleration.z);
+      sum_gyr += V3D(imu->angular_velocity.x, imu->angular_velocity.y, imu->angular_velocity.z);
+    }
+    V3D mean_acc_batch = sum_acc / v_imu.size();
+    V3D mean_gyr_batch = sum_gyr / v_imu.size();
+
+    V3D var_acc = V3D::Zero(), var_gyr = V3D::Zero();
+    for (const auto &imu : v_imu)
+    {
+      V3D acc(imu->linear_acceleration.x, imu->linear_acceleration.y, imu->linear_acceleration.z);
+      V3D gyr(imu->angular_velocity.x, imu->angular_velocity.y, imu->angular_velocity.z);
+      var_acc += (acc - mean_acc_batch).cwiseAbs2();
+      var_gyr += (gyr - mean_gyr_batch).cwiseAbs2();
+    }
+    var_acc /= v_imu.size();
+    var_gyr /= v_imu.size();
+
+    double acc_noise = var_acc.norm();
+    double gyr_noise = var_gyr.norm();
+
+    const double acc_floor = 4e-6;
+    const double gyr_floor = 9e-8;
+
+    // Smoother scaling with EMA and much lower max gain
+    double s_acc_target = 1.0 + vibration_scale_acc * std::max(0.0, (acc_noise - acc_floor) / acc_floor);
+    double s_gyr_target = 1.0 + vibration_scale_gyr * std::max(0.0, (gyr_noise - gyr_floor) / gyr_floor);
+
+    // Clamp target gain to a very conservative range (max 3x instead of 20x)
+    s_acc_target = std::min(s_acc_target, 3.0);
+    s_gyr_target = std::min(s_gyr_target, 3.0);
+
+    // Apply EMA to avoid sudden covariance jumps that cause flips
+    ema_s_acc = 0.9 * ema_s_acc + 0.1 * s_acc_target;
+    ema_s_gyr = 0.9 * ema_s_gyr + 0.1 * s_gyr_target;
+
+    cov_acc = base_cov_acc * ema_s_acc;
+    cov_gyr = base_cov_gyr * ema_s_gyr;
+
+    static int log_counter = 0;
+    if (log_counter++ % 100 == 0) {
+       RCLCPP_INFO(rclcpp::get_logger(""), "Vibration Scaling (EMA) - Acc: %.2f, Gyr: %.2f", ema_s_acc, ema_s_gyr);
+    }
+  }
+
   // state_inout.cov(6, 6) = 0.01;
   // RCLCPP_ERROR_STREAM(rclcpp::get_logger(""),"lidar_meas.lio_vio_flg");
   // cout<<"lidar_meas.lio_vio_flg: "<<lidar_meas.lio_vio_flg<<endl;
@@ -429,6 +543,7 @@ void ImuProcess::UndistortPcl(LidarMeasureGroup &lidar_meas, StatesGroup &state_
       // cout<<setw(20)<<"offset_t: "<<offs_t<<"stamp2Sec(tail->header.stamp):
       // "<<stamp2Sec(tail->header.stamp)<<endl; printf("[ LIO Propagation ]
       // offs_t: %lf \n", offs_t);
+      // offs_t = stamp2Sec(tail) - prop_beg_time: relative to scan start, matches Pose6D contract.
       IMUpose.push_back(set_pose6d(offs_t, acc_imu, angvel_avr, vel_imu, pos_imu, R_imu));
     }
 
@@ -564,14 +679,10 @@ void ImuProcess::Process2(LidarMeasureGroup &lidar_meas, StatesGroup &stat, Poin
     /// The very first lidar frame
     IMU_init(meas, stat, init_iter_num);
 
-    imu_need_init = true;
-
     last_imu = meas.imu.back();
 
-    if (init_iter_num > MAX_INI_COUNT)
+    if (!imu_need_init)
     {
-      // cov_acc *= pow(G_m_s2 / mean_acc.norm(), 2);
-      imu_need_init = false;
       RCLCPP_INFO(rclcpp::get_logger(""), "IMU Initials: Gravity: %.4f %.4f %.4f %.4f; acc covarience: "
                "%.8f %.8f %.8f; gry covarience: %.8f %.8f %.8f \n",
                stat.gravity[0], stat.gravity[1], stat.gravity[2], mean_acc.norm(), cov_acc[0], cov_acc[1], cov_acc[2], cov_gyr[0], cov_gyr[1],

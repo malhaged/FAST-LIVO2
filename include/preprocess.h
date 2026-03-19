@@ -85,18 +85,19 @@ namespace ouster_ros
 struct EIGEN_ALIGN16 Point
 {
   PCL_ADD_POINT4D;
-  float intensity;
   std::uint32_t t;
-  std::uint16_t reflectivity;
-  uint8_t ring;
-  std::uint16_t ambient;
+  std::uint16_t ring;
   std::uint32_t range;
+  std::uint16_t signal;
+  std::uint16_t reflectivity;
+  std::uint16_t near_ir;
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
 } // namespace ouster_ros
-POINT_CLOUD_REGISTER_POINT_STRUCT(ouster_ros::Point, (float, x, x)(float, y, y)(float, z, z)(float, intensity, intensity)
-                                  (std::uint32_t, t, t)(std::uint16_t, reflectivity,
-                                                        reflectivity)(std::uint8_t, ring, ring)(std::uint16_t, ambient, ambient)(std::uint32_t, range, range))
+POINT_CLOUD_REGISTER_POINT_STRUCT(ouster_ros::Point, (float, x, x)(float, y, y)(float, z, z)
+                                  (std::uint32_t, t, t)(std::uint16_t, ring, ring)(std::uint32_t, range, range)
+                                  (std::uint16_t, signal, signal)(std::uint16_t, reflectivity, reflectivity)
+                                  (std::uint16_t, near_ir, near_ir))
 /****************/
 
 /*** Hesai_XT32 ***/

@@ -8,7 +8,7 @@ Thanks to hku mars lab chunran zheng for the open source excellent work
 
 ## About This Fork
 
-This repository is maintained by the **Intelligent Agricultural Systems** research group at **Hochschule Osnabrück**. It is based on the ROS2 port by [integralrobotics](https://github.com/integralrobotics/FAST-LIVO2) and extends FAST-LIVO2 with a dedicated export mode for post-processing with [Global-LVBA](https://github.com/xuankuzcr/Global-LVBA).
+This repository is maintained by the **Intelligent Agricultural Systems** research group at **Hochschule Osnabrück**. It is based on the ROS2 port by [integralrobotics](https://github.com/integralrobotics/FAST-LIVO2) and extends FAST-LIVO2 with bug fixes, new features, and a dedicated export mode for post-processing with [Global-LVBA](https://github.com/xuankuzcr/Global-LVBA).
 
 ### Source Repositories
 
@@ -18,6 +18,71 @@ This repository is maintained by the **Intelligent Agricultural Systems** resear
 | Livox ROS2 Driver | https://github.com/Livox-SDK/livox_ros_driver2 |
 | Livox SDK2 | https://github.com/Livox-SDK/Livox-SDK2 |
 | rpg_vikit (ROS2) | https://github.com/integralrobotics/rpg_vikit |
+
+---
+
+### Bug Fixes
+
+All fixes were validated on ROS2 Humble / Ubuntu 22.04.
+
+**`main.cpp` — Initialization order**
+`LIVMapper` was constructed after `ImageTransport`, leaving the ROS2 node pointer null during `ImageTransport` construction. Fixed by swapping declaration order. Caused SIGSEGV on shutdown with multi-camera setups.
+
+**`LIVMapper.cpp` — Node not returned to caller**
+The constructor created an internal `rclcpp::Node` but never wrote it back into the caller's `shared_ptr`. `ImageTransport` therefore held a null node. Fixed by adding `node = this->node` at the start of the constructor body.
+
+**`LIVMapper.cpp::getImageFromMsg` — Use-after-free**
+`cv_bridge::toCvShare` shares the ROS message buffer. With 4 simultaneous camera topics, the buffer is released immediately after the callback, corrupting images in VIO. Fixed by replacing with `toCvCopy`.
+
+**`LIVMapper.cpp::savePCD` — `VoxelGrid` int32 overflow**
+PCL `VoxelGrid` uses a dense int32 voxel index. At a leaf size of 0.15 m, this overflows silently for maps larger than roughly 350 m × 350 m, causing PCL to skip filtering entirely (65M unfiltered points → SIGSEGV while writing COLMAP output). Replaced with `ApproximateVoxelGrid` (hash-based, no overflow). Validated on a 430 m × 390 m Botanic Garden map.
+
+**`LIVMapper.cpp::savePCD` — COLMAP output performance**
+`std::endl` (stream flush per line) in the `points3D.txt` write loop made writing 10M+ points take many minutes, resulting in SIGKILL before completion. Replaced with `'\n'`.
+
+**`vio.cpp::retrieveFromVisualSparseMap` — Null-pointer dereference**
+`retrieve_voxel_points[i]` can be `nullptr` when the EKF state degenerates after an IMU/LiDAR sync gap. Added null-guard (`if (pt == nullptr) continue`). Caused SIGSEGV.
+
+**`vio.cpp::updateState` / `updateStateInverse` — Heap buffer overflow**
+When map points project outside the image (degenerate EKF state), the gradient stencil reads ±(patch_size_half+1) pixels beyond the image boundary. Added a depth check (`pf[2] > 0`) and a pixel bounds check before the stencil access. ASAN-confirmed out-of-bounds heap read.
+
+---
+
+### New Features
+
+**Vibration-adaptive IMU covariance** (`IMU_Processing`)
+Per-scan IMU variance is computed and used to scale `cov_acc` / `cov_gyr` at runtime via an EMA-smoothed gain (max 3×). Prevents EKF divergence on vibrating platforms (AGVs, drones). Enabled via `imu.vibration_adaptive_en`.
+
+**Motion-detection during IMU init** (`IMU_Processing`)
+Welford's algorithm computes per-axis variance during the initialization window. If significant motion is detected, initialization resets and retries (up to `max_init_retries_`, then proceeds anyway to avoid infinite init loops in dynamic environments).
+
+**`pcd_save.save_raw_points`** (bool, default `false`)
+Saves the unfiltered raw point cloud alongside the voxel-filtered output.
+
+**`pcd_save.type`** (0 = world frame, 1 = body frame)
+Selects the coordinate frame for saved PCD files. Body frame (type 1) is required for Global-LVBA export.
+
+**Image saving** (`image_save.img_save_en`, `image_save.interval`)
+Saves undistorted camera images per VIO frame together with a TUM-format pose file — required for Global-LVBA.
+
+**Graceful shutdown timeouts** (`mapping_avia.launch.py`)
+`sigterm_timeout=120 s`, `sigkill_timeout=60 s` — gives the process enough time to finish writing large PCD and COLMAP output files before the launcher escalates to SIGKILL.
+
+**ARM aarch64 / 32-bit build support** (`CMakeLists.txt`)
+Detects CPU architecture at configure time and selects optimized flags:
+- aarch64 (Jetson Orin NX, RK3588): `-O3 -mcpu=native -mtune=native -ffast-math`
+- ARM 32-bit: adds `-mfpu=neon`
+- x86-64: `-O3 -march=native -mtune=native -funroll-loops`
+
+---
+
+### Supported Dataset Configurations
+
+| Dataset | Main config | Camera config | Notes |
+|---|---|---|---|
+| [Botanic Garden](https://github.com/robot-pesg/BotanicGarden) | `botanical.yaml` | `camera_botanical.yaml` | Livox Avia + Xsens IMU + Dalsa RGB0 |
+| [MARS-LVIG](https://mars.hku.hk/dataset.html) | `MARS_LVIG.yaml` | `camera_MARS_LVIG.yaml` | Aerial, per-sequence time offsets in config |
+| FAST-LIVO2 generic Avia | `avia.yaml` | `camera_pinhole.yaml` | Upstream default |
 
 ---
 

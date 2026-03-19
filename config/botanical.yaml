@@ -1,0 +1,100 @@
+/**:
+  ros__parameters:
+    common:
+      img_topic: "/dalsa_color/left/image_raw"
+      lid_topic: "/livox/lidar"
+      imu_topic: "/imu/data"       # Xsens IMU
+      img_en: 1
+      lidar_en: 1
+      ros_driver_bug_fix: false
+
+    extrin_calib:
+      # T_xsens_livox: Livox LiDAR in Xsens IMU frame
+      # Derived from calib_chain.yaml:
+      #   T_xsens_livox = T_xsens_gray0 * inv(T_bmi088_gray0) * T_bmi088_livox
+      # Rotation is near-identity: Xsens and BMI088 axes are nearly aligned
+      extrinsic_T: [0.126625, -0.013324, -0.001057]
+      extrinsic_R: [ 0.999977,  0.003932,  0.005505,
+                    -0.003884,  0.999955, -0.008655,
+                    -0.005539,  0.008633,  0.999947]
+
+      # T_rgb0_livox: Livox LiDAR in Dalsa RGB0 (left color camera) frame
+      # Source: calib_chain.yaml -> T_rgb0_livox
+      Rcl: [ 0.002661338, -0.999952174, -0.009360136,
+            -0.017816854,  0.009310417, -0.999797750,
+             0.999837988,  0.002828942, -0.017791249]
+      Pcl: [0.146784421, -0.001255284, -0.046659079]
+
+    time_offset:
+      imu_time_offset: 0.0
+      img_time_offset: 0.0    # Needs dataset-specific calibration
+      exposure_time_init: 0.0
+
+    preprocess:
+      point_filter_num: 2     # Default: 1 (Reducing CPU load to prevent IMU buffer lag)
+      filter_size_surf: 0.1
+      lidar_type: 1           # Livox Avia LiDAR (CustomMsg format)
+      scan_line: 6
+      blind: 0.8
+
+    vio:
+      max_iterations: 5
+      outlier_threshold: 1000
+      img_point_cov: 250      # Default: 100 (Trust LIO more in vegetated areas)
+      patch_size: 8
+      patch_pyrimid_level: 4
+      normal_en: true
+      raycast_en: false
+      inverse_composition_en: false
+      exposure_estimate_en: true
+      inv_expo_cov: 0.1
+
+    imu:
+      imu_en: true
+      imu_int_frame: 100       # Increased from 30 for better gravity avg
+      acc_cov: 0.5
+      gyr_cov: 0.1
+      b_acc_cov: 0.0001
+      b_gyr_cov: 0.0001
+      vibration_adaptive_en: false
+      vibration_scale_acc: 2.0
+      vibration_scale_gyr: 1.5
+
+    lio:
+      min_iterations: 12      # Default: 5 (Improved convergence for long runs); correct YAML key
+      dept_err: 0.02
+      beam_err: 0.05
+      min_eigen_value: 0.0025
+      voxel_size: 0.3         # Default: 0.5 (Finer matching for branches/trunks)
+      max_layer: 2
+      max_points_num: 50
+      layer_init_num: [5, 5, 5, 5, 5]
+      points_clear_threshold: 100
+
+    local_map:
+      map_sliding_en: true
+      half_map_size: 100
+      sliding_thresh: 8.0
+
+    uav:
+      imu_rate_odom: false
+      gravity_align_en: true
+
+    publish:
+      dense_map_en: true
+      pub_effect_point_en: false
+      pub_plane_en: false
+      pub_scan_num: 1
+      blind_rgb_points: 0.0
+
+    evo:
+      seq_name: "botanic_garden"
+      pose_output_en: false
+
+    pcd_save:
+      pcd_save_en: true
+      save_raw_points: false
+      incremental_pcd_save_en: false
+      colmap_output_en: true
+      filter_size_pcd: 0.15
+      interval: -1

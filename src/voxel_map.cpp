@@ -56,6 +56,7 @@ void loadVoxelConfig(rclcpp::Node::SharedPtr &node, VoxelMapConfig &voxel_config
   try_declare.template operator()<double>("lio.sigma_num", 3);
   try_declare.template operator()<double>("lio.beam_err", 0.02);
   try_declare.template operator()<double>("lio.dept_err", 0.05);
+  try_declare.template operator()<int>("lio.points_clear_threshold", 100);
 
   // Declaration of parameter of type std::vector<int> won't build, https://github.com/ros2/rclcpp/issues/1585  
   try_declare.template operator()<vector<int64_t>>("lio.layer_init_num", std::vector<int64_t>{5,5,5,5,5}); 
@@ -73,6 +74,7 @@ void loadVoxelConfig(rclcpp::Node::SharedPtr &node, VoxelMapConfig &voxel_config
   node->get_parameter("lio.sigma_num", voxel_config.sigma_num_);
   node->get_parameter("lio.beam_err", voxel_config.beam_err_);
   node->get_parameter("lio.dept_err", voxel_config.dept_err_);
+  node->get_parameter("lio.points_clear_threshold", voxel_config.points_clear_threshold_);
   node->get_parameter("lio.layer_init_num", voxel_config.layer_init_num_);
   node->get_parameter("lio.max_points_num", voxel_config.max_points_num_);
   node->get_parameter("lio.min_iterations", voxel_config.max_iterations_);
@@ -172,7 +174,7 @@ void VoxelOctoTree::init_octo_tree()
     {
       octo_state_ = 0;
       // new added
-      if (temp_points_.size() > max_points_num_)
+      if (temp_points_.size() > max_points_num_ || temp_points_.size() >= points_clear_threshold_)
       {
         update_enable_ = false;
         std::vector<pointWithVar>().swap(temp_points_);
@@ -205,7 +207,7 @@ void VoxelOctoTree::cut_octo_tree()
     int leafnum = 4 * xyz[0] + 2 * xyz[1] + xyz[2];
     if (leaves_[leafnum] == nullptr)
     {
-      leaves_[leafnum] = new VoxelOctoTree(max_layer_, layer_ + 1, layer_init_num_[layer_ + 1], max_points_num_, planer_threshold_);
+      leaves_[leafnum] = new VoxelOctoTree(max_layer_, layer_ + 1, layer_init_num_[layer_ + 1], max_points_num_, planer_threshold_, points_clear_threshold_);
       leaves_[leafnum]->layer_init_num_ = layer_init_num_;
       leaves_[leafnum]->voxel_center_[0] = voxel_center_[0] + (2 * xyz[0] - 1) * quater_length_;
       leaves_[leafnum]->voxel_center_[1] = voxel_center_[1] + (2 * xyz[1] - 1) * quater_length_;
@@ -226,7 +228,7 @@ void VoxelOctoTree::cut_octo_tree()
         {
           leaves_[i]->octo_state_ = 0;
           // new added
-          if (leaves_[i]->temp_points_.size() > leaves_[i]->max_points_num_)
+          if (leaves_[i]->temp_points_.size() > leaves_[i]->max_points_num_ || leaves_[i]->temp_points_.size() >= leaves_[i]->points_clear_threshold_)
           {
             leaves_[i]->update_enable_ = false;
             std::vector<pointWithVar>().swap(leaves_[i]->temp_points_);
@@ -266,7 +268,7 @@ void VoxelOctoTree::UpdateOctoTree(const pointWithVar &pv)
           init_plane(temp_points_, plane_ptr_);
           new_points_ = 0;
         }
-        if (temp_points_.size() >= max_points_num_)
+        if (temp_points_.size() >= max_points_num_ || (plane_ptr_->is_plane_ && temp_points_.size() >= points_clear_threshold_))
         {
           update_enable_ = false;
           std::vector<pointWithVar>().swap(temp_points_);
@@ -286,7 +288,7 @@ void VoxelOctoTree::UpdateOctoTree(const pointWithVar &pv)
         if (leaves_[leafnum] != nullptr) { leaves_[leafnum]->UpdateOctoTree(pv); }
         else
         {
-          leaves_[leafnum] = new VoxelOctoTree(max_layer_, layer_ + 1, layer_init_num_[layer_ + 1], max_points_num_, planer_threshold_);
+          leaves_[leafnum] = new VoxelOctoTree(max_layer_, layer_ + 1, layer_init_num_[layer_ + 1], max_points_num_, planer_threshold_, points_clear_threshold_);
           leaves_[leafnum]->layer_init_num_ = layer_init_num_;
           leaves_[leafnum]->voxel_center_[0] = voxel_center_[0] + (2 * xyz[0] - 1) * quater_length_;
           leaves_[leafnum]->voxel_center_[1] = voxel_center_[1] + (2 * xyz[1] - 1) * quater_length_;
@@ -306,7 +308,7 @@ void VoxelOctoTree::UpdateOctoTree(const pointWithVar &pv)
             init_plane(temp_points_, plane_ptr_);
             new_points_ = 0;
           }
-          if (temp_points_.size() > max_points_num_)
+          if (temp_points_.size() > max_points_num_ || (plane_ptr_->is_plane_ && temp_points_.size() >= points_clear_threshold_))
           {
             update_enable_ = false;
             std::vector<pointWithVar>().swap(temp_points_);
@@ -352,7 +354,7 @@ VoxelOctoTree *VoxelOctoTree::Insert(const pointWithVar &pv)
     if (leaves_[leafnum] != nullptr) { return leaves_[leafnum]->Insert(pv); }
     else
     {
-      leaves_[leafnum] = new VoxelOctoTree(max_layer_, layer_ + 1, layer_init_num_[layer_ + 1], max_points_num_, planer_threshold_);
+      leaves_[leafnum] = new VoxelOctoTree(max_layer_, layer_ + 1, layer_init_num_[layer_ + 1], max_points_num_, planer_threshold_, points_clear_threshold_);
       leaves_[leafnum]->layer_init_num_ = layer_init_num_;
       leaves_[leafnum]->voxel_center_[0] = voxel_center_[0] + (2 * xyz[0] - 1) * quater_length_;
       leaves_[leafnum]->voxel_center_[1] = voxel_center_[1] + (2 * xyz[1] - 1) * quater_length_;
@@ -499,10 +501,10 @@ void VoxelMapManager::StateEstimation(StatesGroup &state_propagat)
     auto vec = state_propagat - state_;
     VD(DIM_STATE)
     solution = K_1.block<DIM_STATE, 6>(0, 0) * HTz + vec.block<DIM_STATE, 1>(0, 0) - G.block<DIM_STATE, 6>(0, 0) * vec.block<6, 1>(0, 0);
-    int minRow, minCol;
-    state_ += solution;
+
     auto rot_add = solution.block<3, 1>(0, 0);
     auto t_add = solution.block<3, 1>(3, 0);
+    state_ += solution;
     if ((rot_add.norm() * 57.3 < 0.01) && (t_add.norm() * 100 < 0.015)) { flg_EKF_converged = true; }
     V3D euler_cur = state_.rot_end.eulerAngles(2, 1, 0);
 
@@ -602,7 +604,7 @@ void VoxelMapManager::BuildVoxelMap()
     }
     else
     {
-      VoxelOctoTree *octo_tree = new VoxelOctoTree(max_layer, 0, layer_init_num[0], max_points_num, planer_threshold);
+      VoxelOctoTree *octo_tree = new VoxelOctoTree(max_layer, 0, layer_init_num[0], max_points_num, planer_threshold, config_setting_.points_clear_threshold_);
       voxel_map_[position] = octo_tree;
       voxel_map_[position]->quater_length_ = voxel_size / 4;
       voxel_map_[position]->voxel_center_[0] = (0.5 + position.x) * voxel_size;
@@ -657,7 +659,7 @@ void VoxelMapManager::UpdateVoxelMap(const std::vector<pointWithVar> &input_poin
     if (iter != voxel_map_.end()) { voxel_map_[position]->UpdateOctoTree(p_v); }
     else
     {
-      VoxelOctoTree *octo_tree = new VoxelOctoTree(max_layer, 0, layer_init_num[0], max_points_num, planer_threshold);
+      VoxelOctoTree *octo_tree = new VoxelOctoTree(max_layer, 0, layer_init_num[0], max_points_num, planer_threshold, config_setting_.points_clear_threshold_);
       voxel_map_[position] = octo_tree;
       voxel_map_[position]->layer_init_num_ = layer_init_num;
       voxel_map_[position]->quater_length_ = voxel_size / 4;

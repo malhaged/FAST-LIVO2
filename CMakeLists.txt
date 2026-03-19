@@ -212,4 +212,16 @@ ament_export_dependencies(
   Sophus
 )
 
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+
+  ament_add_gtest(test_imu_processing test/test_imu_processing.cpp)
+  target_link_libraries(test_imu_processing imu_proc utils)
+  ament_target_dependencies(test_imu_processing ${dependencies})
+
+  ament_add_gtest(test_voxel_map test/test_voxel_map.cpp)
+  target_link_libraries(test_voxel_map lio utils)
+  ament_target_dependencies(test_voxel_map ${dependencies})
+endif()
+
 ament_package()

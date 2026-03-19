@@ -1,16 +1,20 @@
 #!/bin/bash
 
+# Get the directory where the script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+# ROOT_DIR is one level up from scripts/
+ROOT_DIR="$(dirname "$SCRIPT_DIR")"
+
 TARGET_DIRS=(
-    "$(rospack find fast_livo)/Log/Colmap/images"
-    "$(rospack find fast_livo)/Log/Colmap/sparse/0"
+    "$ROOT_DIR/Log/Colmap/images"
+    "$ROOT_DIR/Log/Colmap/sparse/0"
+    "$ROOT_DIR/Log/PCD"
 )
 
 for dir in "${TARGET_DIRS[@]}"; do
     if [ -d "$dir" ]; then
         rm -rf "$dir"
         echo "Removed: $dir"
-    else
-        echo "Not found: $dir"
     fi
 done
 

@@ -966,6 +966,7 @@ void LIVMapper::imu_cbk(const sensor_msgs::msg::Imu::ConstSharedPtr &msg_in)
   if (last_timestamp_imu > 0.0 && timestamp > last_timestamp_imu + 0.2)
   {
     RCLCPP_WARN(this->node->get_logger(), "imu time stamp Jumps %0.4lf seconds \n", timestamp - last_timestamp_imu);
+    last_timestamp_imu = timestamp;  // update so subsequent messages are not also dropped
     mtx_buffer.unlock();
     sig_buffer.notify_all();
     return;

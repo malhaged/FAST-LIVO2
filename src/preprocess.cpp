@@ -267,7 +267,7 @@ void Preprocess::oust64_handler(const sensor_msgs::msg::PointCloud2::ConstShared
       added_pt.x = pl_orig.points[i].x;
       added_pt.y = pl_orig.points[i].y;
       added_pt.z = pl_orig.points[i].z;
-      added_pt.intensity = pl_orig.points[i].intensity;
+      added_pt.intensity = static_cast<float>(pl_orig.points[i].signal);
       added_pt.normal_x = 0;
       added_pt.normal_y = 0;
       added_pt.normal_z = 0;
@@ -318,7 +318,7 @@ void Preprocess::oust64_handler(const sensor_msgs::msg::PointCloud2::ConstShared
       added_pt.x = pl_orig.points[i].x;
       added_pt.y = pl_orig.points[i].y;
       added_pt.z = pl_orig.points[i].z;
-      added_pt.intensity = pl_orig.points[i].intensity;
+      added_pt.intensity = static_cast<float>(pl_orig.points[i].signal);
       added_pt.normal_x = 0;
       added_pt.normal_y = 0;
       added_pt.normal_z = 0;
@@ -332,6 +332,14 @@ void Preprocess::oust64_handler(const sensor_msgs::msg::PointCloud2::ConstShared
 
       pl_surf.points.push_back(added_pt);
     }
+
+    // Ouster points are not guaranteed to be time-ordered; sort by timestamp
+    // before distortion correction (upstream fix: github.com/hku-mars/FAST-LIVO2 issue #269)
+    auto comparePoints = [](const PointType& a, const PointType& b) -> bool
+    {
+      return a.curvature < b.curvature;
+    };
+    std::sort(pl_surf.points.begin(), pl_surf.points.end(), comparePoints);
   }
   // pub_func(pl_surf, pub_full, msg->header.stamp);
   // pub_func(pl_surf, pub_corn, msg->header.stamp);

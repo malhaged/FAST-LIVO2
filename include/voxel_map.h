@@ -44,6 +44,7 @@ typedef struct VoxelMapConfig
   double dept_err_;
   double sigma_num_;
   bool is_pub_plane_map_;
+  int points_clear_threshold_;
 
   // config of local map sliding
   double sliding_thresh;
@@ -143,14 +144,15 @@ public:
   int points_size_threshold_;
   int update_size_threshold_;
   int max_points_num_;
+  int points_clear_threshold_;
   int max_layer_;
   int new_points_;
   bool init_octo_;
   bool update_enable_;
 
-  VoxelOctoTree(int max_layer, int layer, int points_size_threshold, int max_points_num, float planer_threshold)
+  VoxelOctoTree(int max_layer, int layer, int points_size_threshold, int max_points_num, float planer_threshold, int points_clear_threshold = 100)
       : max_layer_(max_layer), layer_(layer), points_size_threshold_(points_size_threshold), max_points_num_(max_points_num),
-        planer_threshold_(planer_threshold)
+        planer_threshold_(planer_threshold), points_clear_threshold_(points_clear_threshold)
   {
     temp_points_.clear();
     octo_state_ = 0;

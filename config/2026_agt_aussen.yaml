@@ -1,0 +1,102 @@
+/**:
+  ros__parameters:
+    common:
+      img_topic: "/cam/image_raw"
+      lid_topic: "/ouster/points"
+      imu_topic: "/imu/data"
+      img_en: 1
+      lidar_en: 1
+      ros_driver_bug_fix: false
+
+    extrin_calib:
+      # LiDAR in IMU frame — from iKalibr outdoor calibration
+      extrinsic_T: [0.023295, -0.001118, 0.057980]
+      extrinsic_R: [-0.9999739684, -0.0053385831,  0.0048540739,
+                     0.0053383757, -0.9999857492, -0.0000556657,
+                     0.0048543019, -0.0000297514,  0.9999882174]
+
+      # T_cam_lidar: LiDAR in camera frame — from iKalibr outdoor calibration
+      Rcl: [ 0.0044850084, -0.9999846581, -0.0032508781,
+            -0.0009535684,  0.0032466326, -0.9999942750,
+             0.9999894876,  0.0044880826, -0.0009389926]
+      Pcl: [-0.0012295757, -0.0298560604, -0.0852634355]
+
+    time_offset:
+      imu_time_offset: 0.0078
+      img_time_offset: 0.000
+      exposure_time_init: 0.0
+
+    preprocess:
+      point_filter_num: 3
+      filter_size_surf: 0.1
+      lidar_type: 3           # 3 = Ouster PointCloud2
+      scan_line: 128          # Ouster OS1-128
+      blind: 0.4
+
+    vio:
+      max_iterations: 5
+      outlier_threshold: 1000
+      img_point_cov: 100
+      patch_size: 8
+      patch_pyrimid_level: 4
+      normal_en: true
+      raycast_en: false
+      inverse_composition_en: false
+      exposure_estimate_en: true
+      inv_expo_cov: 0.1
+
+    imu:
+      imu_en: true
+      imu_int_frame: 100
+      acc_cov: 0.5
+      gyr_cov: 0.1
+      gravity_est_en: true
+      ba_bg_est_en: true
+      vibration_adaptive_en: false
+      vibration_scale_acc: 2.0
+      vibration_scale_gyr: 1.5
+
+    lio:
+      min_iterations: 12      # correct YAML key (maps to max_iterations_ in C++)
+      sigma_num: 3.0
+      dept_err: 0.02
+      beam_err: 0.05
+      min_eigen_value: 0.0025
+      voxel_size: 0.3
+      max_layer: 2
+      max_points_num: 50
+      layer_init_num: [5, 5, 5, 5, 5]
+      points_clear_threshold: 100
+
+    local_map:
+      map_sliding_en: true
+      half_map_size: 100
+      sliding_thresh: 8.0
+
+    uav:
+      imu_rate_odom: false
+      gravity_align_en: true
+
+    publish:
+      dense_map_en: true
+      pub_effect_point_en: false
+      pub_plane_en: false
+      pub_scan_num: 1
+      blind_rgb_points: 0.0
+
+    evo:
+      seq_name: "2026_agt_aussen"
+      pose_output_en: false
+
+    pcd_save:
+      pcd_save_en: true
+      type: 1                 # 1 = Body Frame — required for Global-LVBA export
+      save_raw_points: false
+      incremental_pcd_save_en: false
+      colmap_output_en: true
+      filter_size_pcd: 0.15
+      interval: -1            # Save all frames in one PCD file
+
+    image_save:
+      img_save_en: true       # Required for Global-LVBA export
+      interval: 1             # Save every Nth VIO frame

@@ -1,0 +1,18 @@
+/**:
+  ros__parameters:
+    camera:
+      model: Pinhole
+      # Dalsa RGB0 (left color camera), native 1920x1200
+      width: 1920
+      height: 1200
+      scale: 0.5              # Processed at 960x600
+      # Intrinsics from calib/dalsa_rgb0.yaml
+      fx: 1285.037489588135
+      fy: 1282.905320971802
+      cx: 921.9275250487939
+      cy: 615.7833724677270
+      # Radial distortion only (p1=p2=0)
+      d0: -0.063225205921112
+      d1:  0.100254763768352
+      d2:  0.0
+      d3:  0.0
